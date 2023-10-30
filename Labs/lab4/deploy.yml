@@ -1,0 +1,65 @@
+---
+- hosts: ipam
+  connection: local
+  gather_facts: False
+  vars:
+    vip_network: "10.128.10.0/24"
+  tasks:
+  - name: Return next available IP for target network
+    set_fact:
+      reserved_ip: "{{ lookup('nios_next_ip', vip_network, provider={'host': inventory_hostname, 'username': ipam_username, 'password': ipam_password})[0] }}"
+  - name: Configure an ipv4 host record
+    nios_host_record:
+      name: "{{ app_name }}.example.com"
+      ipv4:
+      - address: "{{ reserved_ip }}"
+      state: present
+      provider:
+        host: "{{ inventory_hostname }}"
+        username: "{{ ipam_username }}"
+        password: "{{ ipam_password }}"
+
+- hosts: localhost
+  connection: local
+  gather_facts: False
+  tasks:
+  - name: Ensure python OpenSSL dependencies are installed.
+    pip:
+      name: pyOpenSSL
+      state: present
+  - name: Generate a private key.
+    openssl_privatekey:
+      path: files/{{ app_name }}_privkey.pem
+  - name: Generate a CSR.
+    openssl_csr:
+      path: files/{{ app_name }}_csr.csr
+      privatekey_path: files/{{ app_name }}_privkey.pem
+      common_name: "{{ app_name }}.example.com"
+  - name: Generate a Self Signed digital certificate.
+    openssl_certificate:
+      path: files/{{ app_name }}_fullchain.pem
+      privatekey_path: files/{{ app_name }}_privkey.pem
+      csr_path: files/{{ app_name }}_csr.csr
+      provider: selfsigned
+
+- hosts: primary
+  connection: local
+  gather_facts: False
+  vars:
+    pool_members: "{{ groups['as3_webservers'] }}"
+    dest_ip: "{{ hostvars['192.168.2.104']['reserved_ip'] }}"
+    certificate: "{{ lookup('file', 'files/{{app_name}}_fullchain.pem') | replace('\n', '\\n') }}"
+    private_key: "{{ lookup('file', 'files/{{app_name}}_privkey.pem') | replace('\n', '\\n') }}"
+  tasks:
+  - name: Send As3 Payload
+    uri:
+      url: "https://{{ inventory_hostname }}/mgmt/shared/appsvcs/declare"
+      method: POST
+      body: "{{ lookup('template', 'templates/as3.j2', split_lines=False) }}"
+      status_code: 200
+      timeout: 300
+      body_format: json
+      force_basic_auth: yes
+      user: "{{ bigip_username }}"
+      password: "{{ bigip_password }}"
+      validate_certs: no

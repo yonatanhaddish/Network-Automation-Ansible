@@ -1,0 +1,119 @@
+[bigips:children]
+primary
+secondary
+
+[bigips:vars]
+bigip_username=admin
+bigip_password=admin
+
+[primary]
+192.168.2.101
+
+[secondary]
+192.168.2.100
+
+[webservers]
+10.128.20.104
+10.128.20.105
+
+[as3_webservers]
+10.128.20.106
+10.128.20.107
+
+[ipam]
+192.168.2.104
+
+[ipam:vars]
+ipam_username=admin
+ipam_password=admin
+
+
+
+# Reserve IP
+# vip_network: "10.128.10.0/24"
+# domain_name: "example.com"
+# reserved_ip: "10.128.10.0, 10.128.10.1, 10.128.10.2, 10.128.10.3 ... "
+# nios_host_record: name: "Spider-Man-World.example.com"
+# ipv4: address: "10.128.10.3"
+
+# # Build F5 VIP
+# host: "10.128.20.104, 10.128.20.105"
+# name: "10.128.20.104, 10.128.20.105"
+# bigip_pool: name: "Spider-Man-World.example.com_pool"
+# lb_method: "round-robin"
+# bigip_pool_member: pool: "Spider-Man-World.example.com_pool"
+# description: "10.128.20.104, 10.128.20.105"
+# address: "10.128.20.104, 10.128.20.105"
+# port: "8081: 8081"
+# bigip_virtual_server: name: "Spider-Man-World.example.com_vs"
+# destination: "10.128.10.3"
+
+# Deploy into Docker
+
+
+
+---
+# Create pool
+- hosts: bigip_devices
+  connection: local
+  gather_facts: false
+  tasks:
+  - name: Add Webserver A
+    bigip_node:
+      provider: "{{ provider }}"
+      name: "10.128.20.104"
+      host: "10.128.20.104"
+
+  - name: Add Webserver B
+    bigip_node:
+      provider: "{{ provider }}"
+      name: "10.128.20.105"
+      host: "10.128.20.105"
+
+  - name: Create Webserver Pool
+    bigip_pool:
+      provider: "{{ provider }}"
+      name: "ansible_webserver_pool"
+      lb_method: "round-robin"
+      monitors:
+      - http
+      - tcp
+      monitor_type: and_list
+
+  - name: Add Webserver A to Webserver Pool
+    bigip_pool_member:
+      provider: "{{ provider }}"
+      pool: "ansible_webserver_pool"
+      host: "10.128.20.104"
+      port: 80
+
+  - name: Add Webserver B to Webserver Pool
+    bigip_pool_member:
+      provider: "{{ provider }}"
+      pool: "ansible_webserver_pool"
+      host: "10.128.20.105"
+      port: 80
+
+# Remove pool
+---
+- hosts: bigip_devices
+  connection: local
+  tasks:
+  - name: Create Webserver Pool
+    bigip_pool:
+      provider: "{{ provider }}"
+      name: "ansible_webserver_pool"
+      lb_method: "round-robin"
+      monitors:
+        - http
+        - tcp
+      monitor_type: and_list
+      state: absent
+
+
+---
+provider:
+  server: "192.168.2.101"
+  user: "admin"
+  password: "admin"
+  validate_certs: False
